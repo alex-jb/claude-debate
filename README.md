@@ -1,5 +1,9 @@
 # claude-debate
 
+[![tests](https://github.com/alex-jb/claude-debate/actions/workflows/tests.yml/badge.svg)](https://github.com/alex-jb/claude-debate/actions/workflows/tests.yml)
+[![python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org)
+[![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 **Pressure-test any decision with a 3-call adversarial debate.** Advocate argues FOR, Critic argues AGAINST (seeing the advocate's case), Judge synthesizes into a structured verdict with calibrated confidence.
 
 Works for PR reviews, architecture choices, hiring calls, trading decisions — anything where both sides have valid points and a single-model "ask once" answer is too confident.
@@ -15,7 +19,12 @@ Pattern extracted from [orallexa-ai-trading-agent](https://github.com/alex-jb/or
 ## Install
 
 ```bash
-pip install claude-debate
+# Until v0.1 hits PyPI, install from git:
+pip install git+https://github.com/alex-jb/claude-debate.git
+
+# Or clone for development:
+git clone https://github.com/alex-jb/claude-debate.git
+cd claude-debate && pip install -e '.[dev]'
 ```
 
 ## Usage
