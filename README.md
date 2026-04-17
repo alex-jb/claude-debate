@@ -56,7 +56,14 @@ print(verdict.strongest_advocate_point)
 print(verdict.strongest_critic_point)
 print(verdict.advocate_case)              # full advocate argument
 print(verdict.critic_case)                # full critic rebuttal
+print(f"${verdict.cost_usd:.4f}")         # exact $USD cost of this debate
 ```
+
+## Composes with claude-tier-router
+
+`claude-debate` uses [`claude-tier-router`](https://github.com/alex-jb/claude-tier-router) internally — the advocate and critic run on the fast tier (Haiku), the judge runs on the deep tier (Sonnet). You get cost tracking for free: `verdict.cost_usd` is the exact USD spent on the debate.
+
+Same pattern, same authors. Install either one and you get consistent Haiku/Sonnet routing across your Claude code.
 
 See [`examples/`](examples/) for PR review, architecture choice, and trading decision demos.
 
@@ -106,9 +113,11 @@ from claude_debate import DebateConfig
 cfg = DebateConfig(
     decision_options=("HIRE", "PASS", "SECOND_LOOP"),
     criteria=["technical signal", "growth trajectory", "team fit", "bar risk"],
-    judge_model="claude-opus-4-7",  # swap in Opus for the judge if stakes are high
+    deep_model="claude-opus-4-7",  # swap in Opus for the judge if stakes are high
 )
 ```
+
+Fields: `decision_options`, `criteria`, `fast_model` (advocate + critic), `deep_model` (judge), `max_tokens_arg`, `max_tokens_judge`, `temperature`.
 
 ## Claude Code skill
 

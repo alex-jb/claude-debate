@@ -3,14 +3,17 @@ run_debate() — three-stage adversarial debate (Advocate/Critic/Judge) over any
 proposal. Returns a structured Verdict.
 
 Pattern:
-  1. Advocate argues FOR              (Haiku — cheap)
-  2. Critic argues AGAINST, rebuts    (Haiku — cheap)
-  3. Judge synthesizes                 (Sonnet — reasoning)
+  1. Advocate argues FOR              (fast tier — Haiku)
+  2. Critic argues AGAINST, rebuts    (fast tier — Haiku)
+  3. Judge synthesizes                 (deep tier — Sonnet)
 
 Cost ~$0.003 per debate with default config. Extracted from the Bull/Bear/Judge
 trading-decision pipeline in orallexa-ai-trading-agent and generalized: the
 same pattern works for PR reviews, architecture choices, hiring calls, any
 binary or ternary decision with real tradeoffs.
+
+Internally uses claude-tier-router so you get per-call cost accounting in the
+returned Verdict — both packages compose.
 """
 from __future__ import annotations
 
@@ -18,10 +21,9 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from claude_debate.prompts import ADVOCATE_TEMPLATE, CRITIC_TEMPLATE, JUDGE_TEMPLATE
+from tier_router import TierRouter, FAST_MODEL, DEEP_MODEL
 
-FAST_MODEL = "claude-haiku-4-5-20251001"
-DEEP_MODEL = "claude-sonnet-4-6"
+from claude_debate.prompts import ADVOCATE_TEMPLATE, CRITIC_TEMPLATE, JUDGE_TEMPLATE
 
 
 @dataclass
@@ -29,9 +31,8 @@ class DebateConfig:
     """Config for a debate run. All fields have sensible defaults."""
     decision_options: tuple[str, ...] = ("APPROVE", "REJECT", "DEFER")
     criteria: list[str] = field(default_factory=lambda: ["correctness", "tradeoffs", "reversibility"])
-    advocate_model: str = FAST_MODEL
-    critic_model: str = FAST_MODEL
-    judge_model: str = DEEP_MODEL
+    fast_model: str = FAST_MODEL   # used by Advocate + Critic
+    deep_model: str = DEEP_MODEL   # used by Judge
     max_tokens_arg: int = 800
     max_tokens_judge: int = 600
     temperature: float = 0.0
@@ -48,6 +49,7 @@ class Verdict:
     critic_case: str
     strongest_advocate_point: str
     strongest_critic_point: str
+    cost_usd: float
     raw_judge_json: dict
 
 
@@ -77,16 +79,6 @@ def _parse_json(text: str) -> dict:
     return json.loads(text)
 
 
-def _call(client: Any, *, model: str, prompt: str, max_tokens: int, temperature: float) -> str:
-    response = client.messages.create(
-        model=model,
-        max_tokens=max_tokens,
-        temperature=temperature,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return _extract_text(response)
-
-
 def run_debate(
     proposal: str,
     *,
@@ -99,32 +91,33 @@ def run_debate(
     Args:
         proposal: one-sentence description of what's being decided.
         client: an anthropic.Anthropic instance (or anything with the same
-            .messages.create signature).
+            .messages.create signature). Internally wrapped in a TierRouter.
         context: dict of facts/evidence to hand every speaker. Optional.
         config: override models, criteria, decision options. Optional.
 
     Returns:
-        Verdict — structured decision with the full advocate/critic arguments
-        and the judge's reasoning.
+        Verdict — structured decision with the full advocate/critic arguments,
+        the judge's reasoning, and the total $USD cost across all three calls.
 
     Raises:
         ValueError: if the judge output doesn't parse as the expected JSON
             shape or picks a decision outside config.decision_options.
     """
     cfg = config or DebateConfig()
+    router = TierRouter(client, fast_model=cfg.fast_model, deep_model=cfg.deep_model)
+
     ctx_block = _format_context(context)
     criteria_block = _format_criteria(cfg.criteria)
 
     advocate_prompt = ADVOCATE_TEMPLATE.format(
         proposal=proposal, context=ctx_block, criteria=criteria_block
     )
-    advocate_case = _call(
-        client,
-        model=cfg.advocate_model,
-        prompt=advocate_prompt,
+    advocate_resp = router.fast(
+        messages=[{"role": "user", "content": advocate_prompt}],
         max_tokens=cfg.max_tokens_arg,
         temperature=cfg.temperature,
     )
+    advocate_case = _extract_text(advocate_resp)
 
     critic_prompt = CRITIC_TEMPLATE.format(
         proposal=proposal,
@@ -132,13 +125,12 @@ def run_debate(
         criteria=criteria_block,
         advocate_case=advocate_case,
     )
-    critic_case = _call(
-        client,
-        model=cfg.critic_model,
-        prompt=critic_prompt,
+    critic_resp = router.fast(
+        messages=[{"role": "user", "content": critic_prompt}],
         max_tokens=cfg.max_tokens_arg,
         temperature=cfg.temperature,
     )
+    critic_case = _extract_text(critic_resp)
 
     judge_prompt = JUDGE_TEMPLATE.format(
         proposal=proposal,
@@ -148,13 +140,12 @@ def run_debate(
         critic_case=critic_case,
         decision_options=" | ".join(cfg.decision_options),
     )
-    judge_text = _call(
-        client,
-        model=cfg.judge_model,
-        prompt=judge_prompt,
+    judge_resp = router.deep(
+        messages=[{"role": "user", "content": judge_prompt}],
         max_tokens=cfg.max_tokens_judge,
         temperature=cfg.temperature,
     )
+    judge_text = _extract_text(judge_resp)
 
     try:
         data = _parse_json(judge_text)
@@ -182,5 +173,6 @@ def run_debate(
         critic_case=critic_case,
         strongest_advocate_point=str(data.get("strongest_advocate_point", "")),
         strongest_critic_point=str(data.get("strongest_critic_point", "")),
+        cost_usd=round(router.total_cost_usd, 6),
         raw_judge_json=data,
     )

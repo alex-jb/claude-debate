@@ -34,6 +34,7 @@ def main():
     print(f"Detail:  {verdict.reasoning_detail}\n")
     print(f"Strongest advocate point: {verdict.strongest_advocate_point}")
     print(f"Strongest critic point:   {verdict.strongest_critic_point}")
+    print(f"\nDebate cost: ${verdict.cost_usd:.4f}")
 
 
 if __name__ == "__main__":

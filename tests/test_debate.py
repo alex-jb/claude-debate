@@ -11,15 +11,17 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from claude_debate import run_debate, Verdict, DebateConfig
-from claude_debate.debate import FAST_MODEL, DEEP_MODEL
+from tier_router import FAST_MODEL, DEEP_MODEL
 
 
-def _mock_response(text: str):
+def _mock_response(text: str, input_tokens: int = 200, output_tokens: int = 100):
     resp = MagicMock()
     block = MagicMock()
     block.type = "text"
     block.text = text
     resp.content = [block]
+    resp.usage.input_tokens = input_tokens
+    resp.usage.output_tokens = output_tokens
     return resp
 
 
@@ -156,3 +158,21 @@ def test_no_context_uses_placeholder():
     run_debate("Proposal", client=client)
     advocate_prompt = client.messages.create.call_args_list[0].kwargs["messages"][0]["content"]
     assert "no additional context" in advocate_prompt
+
+
+def test_verdict_includes_cost_usd():
+    client = _mock_client("A", "C", _valid_judge())
+    verdict = run_debate("Proposal", client=client)
+    # With 200 input + 100 output tokens per call * 3 calls, cost is non-zero
+    assert verdict.cost_usd > 0
+    assert verdict.cost_usd < 0.01  # sanity: a mocked debate should cost pennies
+
+
+def test_debate_uses_tier_router_tiers():
+    """Advocate and critic both go through the fast tier; judge through deep."""
+    client = _mock_client("A", "C", _valid_judge())
+    run_debate("Proposal", client=client)
+    models = [c.kwargs["model"] for c in client.messages.create.call_args_list]
+    assert models[0] == FAST_MODEL
+    assert models[1] == FAST_MODEL
+    assert models[2] == DEEP_MODEL

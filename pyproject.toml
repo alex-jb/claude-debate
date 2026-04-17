@@ -25,6 +25,7 @@ classifiers = [
 ]
 dependencies = [
     "anthropic>=0.34",
+    "claude-tier-router @ git+https://github.com/alex-jb/claude-tier-router.git@v0.1.0",
 ]
 
 [project.optional-dependencies]
